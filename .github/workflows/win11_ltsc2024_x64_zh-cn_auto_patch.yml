@@ -1,0 +1,277 @@
+name: Win11 LTSC 2024 X64 ZH-CN Auto Patch (7z Accelerated)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"
+
+permissions:
+  contents: write
+  workflows: write
+
+env:
+  ISO_RELEASE_TAG: Windows_11_LTSC_2024_X64_ZH-CN
+  ISO_LABEL: ge_refresh_enterprise_ltsc_2024_x64frev
+  EXPECTED_ISO_HASH: 2cb21649590c8cf770cd93556596dff4fd800f24d267a9be9d9ce0ee9e03f5ac
+  SPLIT_SIZE: 2000m
+  SEVENZIP: "C:\\Program Files\\7-Zip\\7z.exe"
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 0. Start marker
+      - name: Start workflow
+        shell: pwsh
+        run: Write-Host "Starting Win11 LTSC 2024 Auto Patch workflow"
+
+      # 1-3: Get latest patch script commit and decide whether to run (idempotency guard)
+      - name: Get patch script latest commit
+        id: script
+        shell: pwsh
+        run: |
+          function Invoke-RestMethodWithRetry([string]$uri, [int]$maxAttempts=5, [int]$delaySeconds=120) {
+            for ($i = 1; $i -le $maxAttempts; $i++) {
+              try {
+                return Invoke-RestMethod $uri
+              } catch {
+                Write-Host "Invoke-RestMethod failed (attempt $i/$maxAttempts): $($_.Exception.Message)"
+                if ($i -lt $maxAttempts) {
+                  Write-Host "Retrying in $delaySeconds seconds..."
+                  Start-Sleep -Seconds $delaySeconds
+                } else {
+                  throw
+                }
+              }
+            }
+          }
+
+          $repo = Invoke-RestMethodWithRetry "https://api.github.com/repos/adavak/Win_ISO_Patching_Scripts"
+          $branch = $repo.default_branch
+          $commit = Invoke-RestMethodWithRetry "https://api.github.com/repos/adavak/Win_ISO_Patching_Scripts/commits/$branch"
+          "sha=$($commit.sha)" >> $env:GITHUB_OUTPUT
+
+      - name: Read last script commit
+        id: last
+        shell: pwsh
+        run: |
+          $sha = ""
+          if (Test-Path last_script_commit.txt) {
+            $lines = Get-Content last_script_commit.txt
+            foreach ($line in $lines) {
+              if ($line -match "^\s*${{ env.ISO_RELEASE_TAG }}=(\S+)\s*$") {
+                $sha = $matches[1]
+              }
+            }
+          }
+          "sha=$sha" >> $env:GITHUB_OUTPUT
+
+      - name: Check if workflow should run
+        id: check
+        shell: pwsh
+        run: |
+          if ("${{ steps.script.outputs.sha }}" -eq "${{ steps.last.outputs.sha }}") {
+            "run=false" >> $env:GITHUB_OUTPUT
+          } else {
+            "run=true" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Skip if no update
+        if: steps.check.outputs.run == 'false'
+        run: echo "No script update for this workflow, skip build."
+
+      # 4. Prepare workspace
+      - name: Prepare workspace
+        if: steps.check.outputs.run == 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path download, patcher, release
+
+      # 5. Clone patch scripts (with retry to avoid hangs)
+      - name: Clone patch scripts
+        if: steps.check.outputs.run == 'true'
+        shell: pwsh
+        run: |
+          $maxAttempts = 5
+          $delaySeconds = 120
+          $repoUrl = 'https://github.com/adavak/Win_ISO_Patching_Scripts.git'
+          for ($i = 1; $i -le $maxAttempts; $i++) {
+            Write-Host "Cloning patch scripts (attempt $i/$maxAttempts)..."
+            & git clone $repoUrl patcher
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "Clone succeeded"
+              break
+            }
+            Write-Host "git clone failed with exit code $LASTEXITCODE"
+            if ($i -lt $maxAttempts) {
+              Write-Host "Retrying in $delaySeconds seconds..."
+              Start-Sleep -Seconds $delaySeconds
+            } else {
+              throw "git clone failed after $maxAttempts attempts"
+            }
+          }
+
+      # 6. Download split ISO zip parts
+      - name: Download ISO zip parts
+        if: steps.check.outputs.run == 'true'
+        shell: pwsh
+        run: |
+          function Invoke-RestMethodWithRetry([string]$uri, [int]$maxAttempts=5, [int]$delaySeconds=120) {
+            for ($i = 1; $i -le $maxAttempts; $i++) {
+              try {
+                return Invoke-RestMethod $uri
+              } catch {
+                Write-Host "Invoke-RestMethod failed (attempt $i/$maxAttempts): $($_.Exception.Message)"
+                if ($i -lt $maxAttempts) {
+                  Write-Host "Retrying in $delaySeconds seconds..."
+                  Start-Sleep -Seconds $delaySeconds
+                } else {
+                  throw
+                }
+              }
+            }
+          }
+
+          $api = "https://api.github.com/repos/adavak/win_iso_zip/releases/tags/${{ env.ISO_RELEASE_TAG }}"
+          $json = Invoke-RestMethodWithRetry $api
+          $parts = $json.assets | Where-Object { $_.name -match '\.zip\.\d+$' } | Sort-Object name
+          if ($parts.Count -eq 0) { throw "No zip parts found" }
+          foreach ($p in $parts) {
+            Invoke-WebRequest $p.browser_download_url -OutFile "download\$($p.name)"
+          }
+
+      # 7. Merge & extract using 7z
+      - name: Extract ISO using 7z
+        if: steps.check.outputs.run == 'true'
+        shell: pwsh
+        run: |
+          $sevenZip = "${{ env.SEVENZIP }}"
+          if (-not (Test-Path $sevenZip)) { throw "7z.exe not found at $sevenZip" }
+          & $sevenZip x "download\*.zip.001" -o"patcher" -y
+
+      # 8. Verify original ISO SHA256
+      - name: Verify ISO SHA256
+        if: steps.check.outputs.run == 'true'
+        shell: pwsh
+        run: |
+          $sevenZip = "${{ env.SEVENZIP }}"
+          $iso = Get-ChildItem patcher -Filter *.iso -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $iso) { throw "Original ISO not found" }
+
+          $hashOutput = & $sevenZip h -scrcSHA256 "$($iso.FullName)"
+          $hashMatches = $hashOutput | Select-String -Pattern '([a-fA-F0-9]{64})' | ForEach-Object { $_.Matches[0].Value }
+          $actual = ($hashMatches | Select-Object -First 1).Trim().ToLower()
+          if ($actual -ne "${{ env.EXPECTED_ISO_HASH }}") { throw "SHA256 mismatch: $actual" }
+          
+      # 9. Run Start.cmd (auto exit via choice 9)
+      - name: Run Start.cmd
+        if: steps.check.outputs.run == 'true'
+        shell: cmd
+        run: |
+          cd patcher
+          (
+            echo 9
+            echo 9
+            echo 9
+          ) | Start.cmd
+
+      # 10. Rename ISO and split using 7z
+      - name: Rename ISO and split
+        id: iso
+        if: steps.check.outputs.run == 'true'
+        shell: pwsh
+        run: |
+          $sevenZip = "${{ env.SEVENZIP }}"
+          $iso = Get-ChildItem patcher -Filter *.iso -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+
+          # Version/build and locale
+          if ($iso.Name -match '(\d{1,6}\.\d{1,6})') { $versionBuild = $matches[1]; $version,$build=$versionBuild -split '\.' }
+          if ($iso.Name -match '([A-Za-z]+-[A-Za-z]+)') { $locale = $matches[1].ToLower() }
+
+          $date = Get-Date -Format "yyMMdd"
+          $time = "0800"
+
+          # 7z SHA256
+          $hashOutput = & $sevenZip h -scrcSHA256 "$($iso.FullName)"
+          $hashMatches = $hashOutput | Select-String -Pattern '([a-fA-F0-9]{64})' | ForEach-Object { $_.Matches[0].Value }
+          $hash = ($hashMatches | Select-Object -First 1).Trim().ToLower()
+          if (-not $hash -or $hash.Length -lt 8) { throw "Failed to parse valid SHA256 from 7z output" }
+          $hash8 = $hash.Substring($hash.Length-8,8)
+
+          $newName = "$version.$build.$date-$time.${env:ISO_LABEL}_${locale}_$hash8.iso"
+          Rename-Item -Path $iso.FullName -NewName $newName
+
+          # Split using 7z
+          & $sevenZip a "release\$newName.zip" "patcher\$newName" -v${{ env.SPLIT_SIZE }}
+
+          $runTimeTag = (Get-Date).ToString("yyyyMMdd-HHmm")
+          $tag = "$env:ISO_RELEASE_TAG-$version.$build-$runTimeTag"
+          $isoFile = "patcher\$newName"
+          # Use safe output append format
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "iso_file=$isoFile" >> $env:GITHUB_OUTPUT
+          "iso_sha256=$hash" >> $env:GITHUB_OUTPUT
+
+      # 11. Create Git tag
+      - name: Create Git tag
+        if: steps.check.outputs.run == 'true'
+        shell: pwsh
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          $tag = "${{ steps.iso.outputs.tag }}"
+          if (-not $tag) { throw "Tag is empty" }
+
+          $exists = git tag -l $tag
+          if (-not $exists) {
+            git tag $tag
+            git push origin $tag
+          }
+
+      # 12. Create GitHub Release
+      - name: Create Release
+        if: steps.check.outputs.run == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.iso.outputs.tag }}
+          name: ${{ steps.iso.outputs.tag }}
+          body: |
+            ISO SHA256: ${{ steps.iso.outputs.iso_sha256 }}
+          files: release/*.zip.*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 13. Record patch script commit
+      - name: Record patch script commit
+        if: steps.check.outputs.run == 'true'
+        shell: pwsh
+        run: |
+          $sha = "${{ steps.script.outputs.sha }}"
+          $workflow = "${{ env.ISO_RELEASE_TAG }}"
+          $lines = @()
+          if (Test-Path last_script_commit.txt) {
+            $lines = Get-Content last_script_commit.txt
+            $found = $false
+            for ($i=0; $i -lt $lines.Count; $i++) {
+              if ($lines[$i] -match "^\s*$workflow=") {
+                $lines[$i] = "$workflow=$sha"
+                $found = $true
+              }
+            }
+            if (-not $found) { $lines += "$workflow=$sha" }
+          } else {
+            $lines = @("$workflow=$sha")
+          }
+          $lines | Out-File last_script_commit.txt -Encoding ascii
+
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add last_script_commit.txt
+          if (-not (git diff --cached --quiet)) {
+            git commit -m "chore: record patch script commit for $workflow"
+            git pull --rebase
+            git push
+          }
