@@ -5,9 +5,7 @@ on:
   schedule:
     - cron: "0 3 * * *"
 
-permissions:
-  contents: write
-  workflows: write
+permissions: write-all
 
 env:
   ISO_RELEASE_TAG: Windows_11_LTSC_2024_X64_ZH-CN
