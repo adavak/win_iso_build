@@ -271,5 +271,5 @@ jobs:
           git add last_script_commit.txt
           if (-not (git diff --cached --quiet)) {
             git commit -m "chore: record patch script commit for $key"
-            git push origin HEAD:main
+            git push --force-with-lease origin HEAD:main
           }
