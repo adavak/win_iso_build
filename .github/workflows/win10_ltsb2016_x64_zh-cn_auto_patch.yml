@@ -52,20 +52,32 @@ jobs:
           $commit = Invoke-RestMethodWithRetry "https://api.github.com/repos/adavak/Win_ISO_Patching_Scripts/commits/$branch"
           "sha=$($commit.sha)" >> $env:GITHUB_OUTPUT
 
+      # 2. Read last script commit from Release body
       - name: Read last script commit
         id: last
         shell: pwsh
         run: |
-          $sha = ""
-          if (Test-Path last_script_commit.txt) {
-            $lines = Get-Content last_script_commit.txt
-            foreach ($line in $lines) {
-              if ($line -match "^\s*${{ env.ISO_RELEASE_TAG }}=(\S+)\s*$") {
-                $sha = $matches[1]
-              }
+          $repo   = "${{ github.repository }}"
+          $prefix = "${{ env.ISO_RELEASE_TAG }}"
+
+          $api = "https://api.github.com/repos/$repo/releases?per_page=50"
+
+          try {
+            $releases = Invoke-RestMethod $api
+
+            $matched = $releases |
+              Where-Object { $_.tag_name -like "$prefix*" } |
+              Sort-Object published_at -Descending |
+              Select-Object -First 1
+
+            if ($matched -and $matched.body -match 'SCRIPT_COMMIT=([a-f0-9]{40})') {
+              "sha=$($matches[1])" >> $env:GITHUB_OUTPUT
+            } else {
+              "sha=" >> $env:GITHUB_OUTPUT
             }
+          } catch {
+            "sha=" >> $env:GITHUB_OUTPUT
           }
-          "sha=$sha" >> $env:GITHUB_OUTPUT
 
       - name: Check if workflow should run
         id: check
@@ -235,41 +247,10 @@ jobs:
           name: ${{ steps.iso.outputs.tag }}
           body: |
             ISO SHA256: ${{ steps.iso.outputs.iso_sha256 }}
+
+            <!-- STATE
+            SCRIPT_COMMIT=${{ steps.script.outputs.sha }}
+            -->
           files: release/*.zip.*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # 13. Record patch script commit
-      - name: Record patch script commit
-        if: steps.check.outputs.run == 'true'
-        shell: pwsh
-        run: |
-          $sha = "${{ steps.script.outputs.sha }}"
-          $key = "${{ env.ISO_RELEASE_TAG }}"
-
-          $lines = @()
-          $found = $false
-
-          if (Test-Path last_script_commit.txt) {
-            $lines = Get-Content last_script_commit.txt
-            for ($i = 0; $i -lt $lines.Count; $i++) {
-              if ($lines[$i] -match "^\s*$key=") {
-                $lines[$i] = "$key=$sha"
-                $found = $true
-              }
-            }
-          }
-
-          if (-not $found) {
-            $lines += "$key=$sha"
-          }
-
-          $lines | Out-File last_script_commit.txt -Encoding ascii
-
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add last_script_commit.txt
-          if (-not (git diff --cached --quiet)) {
-            git commit -m "chore: record patch script commit for $key"
-            git push --force-with-lease origin HEAD:main
-          }
