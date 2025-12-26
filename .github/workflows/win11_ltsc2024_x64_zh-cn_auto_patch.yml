@@ -3,7 +3,7 @@ name: Win11 LTSC 2024 X64 ZH-CN Auto Patch (7z Accelerated)
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 3 * * *"
+    - cron: "0 */3 * * *"
 
 permissions: write-all
 
