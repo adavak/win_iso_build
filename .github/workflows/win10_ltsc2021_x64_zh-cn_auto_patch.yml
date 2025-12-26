@@ -163,7 +163,7 @@ jobs:
           $hashMatches = $hashOutput | Select-String -Pattern '([a-fA-F0-9]{64})' | ForEach-Object { $_.Matches[0].Value }
           $actual = ($hashMatches | Select-Object -First 1).Trim().ToLower()
           if ($actual -ne "${{ env.EXPECTED_ISO_HASH }}") { throw "SHA256 mismatch: $actual" }
-          
+
       # 9. Run Start.cmd (auto exit via choice 9)
       - name: Run Start.cmd
         if: steps.check.outputs.run == 'true'
@@ -208,7 +208,7 @@ jobs:
           $runTimeTag = (Get-Date).ToString("yyyyMMdd-HHmm")
           $tag = "$env:ISO_RELEASE_TAG-$version.$build-$runTimeTag"
           $isoFile = "patcher\$newName"
-          # Use safe output append format
+
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "iso_file=$isoFile" >> $env:GITHUB_OUTPUT
           "iso_sha256=$hash" >> $env:GITHUB_OUTPUT
@@ -221,10 +221,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           $tag = "${{ steps.iso.outputs.tag }}"
-          if (-not $tag) { throw "Tag is empty" }
-
-          $exists = git tag -l $tag
-          if (-not $exists) {
+          if (-not (git tag -l $tag)) {
             git tag $tag
             git push origin $tag
           }
@@ -248,28 +245,31 @@ jobs:
         shell: pwsh
         run: |
           $sha = "${{ steps.script.outputs.sha }}"
-          $workflow = "${{ env.ISO_RELEASE_TAG }}"
+          $key = "${{ env.ISO_RELEASE_TAG }}"
+
           $lines = @()
+          $found = $false
+
           if (Test-Path last_script_commit.txt) {
             $lines = Get-Content last_script_commit.txt
-            $found = $false
-            for ($i=0; $i -lt $lines.Count; $i++) {
-              if ($lines[$i] -match "^\s*$workflow=") {
-                $lines[$i] = "$workflow=$sha"
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+              if ($lines[$i] -match "^\s*$key=") {
+                $lines[$i] = "$key=$sha"
                 $found = $true
               }
             }
-            if (-not $found) { $lines += "$workflow=$sha" }
-          } else {
-            $lines = @("$workflow=$sha")
           }
+
+          if (-not $found) {
+            $lines += "$key=$sha"
+          }
+
           $lines | Out-File last_script_commit.txt -Encoding ascii
 
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add last_script_commit.txt
           if (-not (git diff --cached --quiet)) {
-            git commit -m "chore: record patch script commit for $workflow"
-            git pull --rebase
-            git push
+            git commit -m "chore: record patch script commit for $key"
+            git push origin HEAD:main
           }
