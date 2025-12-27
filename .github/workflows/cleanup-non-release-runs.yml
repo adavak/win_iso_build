@@ -15,19 +15,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Install GitHub CLI
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gh jq
-
-      - name: Authenticate GH CLI
-        run: |
-          echo "${GH_TOKEN}" | gh auth login --with-token
+          sudo apt-get install -y jq curl
 
       - name: Fetch recent workflow runs
         run: |
           echo 'Fetching workflow runs...'
-          gh api repos/${{ github.repository }}/actions/runs?per_page=50 > runs.json
+          curl -s -H "Authorization: token $GH_TOKEN" \
+            https://api.github.com/repos/${{ github.repository }}/actions/runs?per_page=50 \
+            > runs.json
           echo "Saved workflow runs to runs.json"
 
       - name: Delete short workflow runs (<10 minutes)
@@ -48,7 +46,8 @@ jobs:
               if [ $duration -lt $threshold ]; then
                   # ⚠️ Warning for short run
                   echo $'\u26A0\ufe0f Workflow run '"$run_id"' duration '"$duration"' seconds < '"$threshold"', deleting...'
-                  gh api -X DELETE "repos/${{ github.repository }}/actions/runs/$run_id"
+                  curl -s -X DELETE -H "Authorization: token $GH_TOKEN" \
+                    "https://api.github.com/repos/${{ github.repository }}/actions/runs/$run_id"
               else
                   # ✅ Keep run
                   echo $'\u2705 Workflow run '"$run_id"' duration '"$duration"' seconds, keep'
