@@ -1,4 +1,4 @@
-name: Test Workflow Runs Against Releases
+name: Test Workflow Runs by Artifact
 
 on:
   workflow_dispatch:
@@ -17,7 +17,7 @@ jobs:
       - name: Fetch workflow runs
         run: |
           echo "Fetching workflow runs..."
-          gh api repos/${{ github.repository }}/actions/runs > runs.json
+          gh api repos/${{ github.repository }}/actions/runs?per_page=50 > runs.json
           echo "Saved workflow runs to runs.json"
 
       - name: Fetch releases
@@ -26,24 +26,32 @@ jobs:
           gh api repos/${{ github.repository }}/releases > releases.json
           echo "Saved releases to releases.json"
 
-      - name: Check workflow runs against releases
+      - name: Check workflow runs by artifact
         run: |
           echo "Checking workflow runs..."
           for run_id in $(jq -r '.workflow_runs[].id' runs.json); do
-              run_sha=$(jq -r ".workflow_runs[] | select(.id==$run_id) | .head_sha")
-              echo "Run $run_id -> SHA $run_sha"
+              echo "Checking run $run_id ..."
 
-              # 匹配 release 的 target_commitish
-              matched_release=$(jq -r --arg sha "$run_sha" '.[] | select(.target_commitish==$sha) | .tag_name' releases.json)
+              # 获取该 run 的 artifacts
+              gh api repos/${{ github.repository }}/actions/runs/$run_id/artifacts > artifacts.json
+              artifact_name=$(jq -r '.artifacts[0].name // empty' artifacts.json)
+
+              if [ -z "$artifact_name" ]; then
+                  echo "⚠️ Workflow run $run_id has no artifacts, skipping..."
+                  continue
+              fi
+
+              # 匹配 release tag
+              matched_release=$(jq -r --arg name "$artifact_name" '.[] | select(.tag_name==$name) | .tag_name' releases.json)
 
               if [ -z "$matched_release" ]; then
-                  echo "⚠️ Workflow run $run_id has no corresponding release"
+                  echo "⚠️ Workflow run $run_id artifact $artifact_name has no corresponding release"
               else
                   release_note=$(jq -r --arg tag "$matched_release" '.[] | select(.tag_name==$tag) | .body' releases.json)
-                  if echo "$release_note" | grep -q "SHA256"; then
-                      echo "✅ Workflow run $run_id has SHA256"
+                  if echo "$release_note" | grep -q "ISO SHA256:"; then
+                      echo "✅ Workflow run $run_id artifact $artifact_name has ISO SHA256"
                   else
-                      echo "⚠️ Workflow run $run_id has release but NO SHA256"
+                      echo "⚠️ Workflow run $run_id artifact $artifact_name release has no ISO SHA256"
                   fi
               fi
           done
