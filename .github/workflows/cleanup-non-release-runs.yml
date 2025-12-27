@@ -1,21 +1,21 @@
 name: Test Clean Workflow Runs
 
 on:
-  workflow_dispatch:   # 手动触发
+  workflow_dispatch:
   schedule:
-    - cron: '0 */3 * * *'  # 每3小时运行一次
+    - cron: '0 */3 * * *'
 
 jobs:
   check-runs:
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}  # 使用你添加的 secret
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
 
       - name: Set up GitHub CLI
-        uses: cli/gh-action@v2
+        uses: actions/setup-gh@v2
 
       - name: Authenticate GH CLI
         run: |
@@ -34,10 +34,8 @@ jobs:
           for run_id in $(jq -r '.[].id' runs.json); do
             echo "Checking workflow run $run_id..."
 
-            # 获取 workflow run 的 commit SHA
             run_sha=$(jq -r ".[] | select(.id==$run_id) | .head_sha" runs.json)
 
-            # 查询这个 commit 或 tag 对应的 release
             release_note=$(gh api repos/${{ github.repository }}/releases \
               -q ".[] | select(.tag_name==\"$run_sha\") | .body" || echo "")
 
