@@ -1,45 +1,38 @@
-name: Check Workflow Runs by SHA256
+name: Check Workflow Run Duration
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */3 * * *'  # 每3小时运行一次
+    - cron: '0 */3 * * *'
 
 jobs:
-  check-runs:
+  check-duration:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-
       - name: Fetch workflow runs
         run: |
           echo "Fetching workflow runs..."
           gh api repos/${{ github.repository }}/actions/runs?per_page=50 > runs.json
           echo "Saved workflow runs to runs.json"
 
-      - name: Check workflow runs logs for ISO SHA256
+      - name: Check run duration
         run: |
-          echo "Checking workflow runs..."
+          echo "Checking workflow run durations..."
           
-          for run_id in $(jq -r '.workflow_runs[].id' runs.json); do
-              echo "Checking run $run_id ..."
+          jq -r '.workflow_runs[] | "\(.id) \(.run_started_at) \(.updated_at)"' runs.json > runs_times.txt
+          
+          threshold=600  # 10分钟, 小于10分钟认为无效
+          
+          while read run_id start_time end_time; do
+              start_ts=$(date -d "$start_time" +%s)
+              end_ts=$(date -d "$end_time" +%s)
+              duration=$((end_ts - start_ts))
               
-              # 获取 log url
-              log_url=$(jq -r ".workflow_runs[] | select(.id==$run_id) | .logs_url")
-              
-              if [ -z "$log_url" ]; then
-                  echo "⚠️ Workflow run $run_id has no logs_url, skipping..."
-                  continue
-              fi
-              
-              # 下载日志并检查 ISO SHA256
-              curl -s -H "Authorization: token $GH_TOKEN" "$log_url" -o run_${run_id}.zip
-              if unzip -p run_${run_id}.zip | grep -q "ISO SHA256:"; then
-                  echo "✅ Workflow run $run_id has ISO SHA256, keep it"
+              if [ $duration -lt $threshold ]; then
+                  echo "⚠️ Workflow run $run_id duration $duration seconds < $threshold, likely invalid"
               else
-                  echo "⚠️ Workflow run $run_id has NO ISO SHA256, could be deleted"
+                  echo "✅ Workflow run $run_id duration $duration seconds, valid"
               fi
-          done
+          done < runs_times.txt
