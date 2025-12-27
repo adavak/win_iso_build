@@ -14,26 +14,36 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Check workflow runs without SHA256 release note
+      - name: Authenticate GH CLI
+        run: |
+          echo "$GH_TOKEN" | gh auth login --with-token
+
+      - name: Fetch workflow runs and releases
         run: |
           echo "Fetching workflow runs..."
-          # 获取 workflow runs
           gh api repos/${{ github.repository }}/actions/runs > runs.json
+          echo "Fetching release tags..."
+          gh api repos/${{ github.repository }}/releases -q '.[].tag_name' > release_tags.txt
 
-          echo "Checking each workflow run:"
-          # 遍历 workflow_runs 数组
+      - name: Check workflow runs against releases
+        run: |
           for run_id in $(jq -r '.workflow_runs[].id' runs.json); do
-            run_sha=$(jq -r ".workflow_runs[] | select(.id==$run_id) | .head_sha" runs.json)
-            echo "Run $run_id -> SHA $run_sha"
+            run_name=$(jq -r ".workflow_runs[] | select(.id==$run_id) | .name")
+            run_branch=$(jq -r ".workflow_runs[] | select(.id==$run_id) | .head_branch")
+            echo "Checking run $run_id -> branch $run_branch / name $run_name"
 
-            # 查询对应 release note
-            release_body=$(gh api repos/${{ github.repository }}/releases \
-              -q ".[] | select(.tag_name==\"${run_sha}\") | .body" || echo "")
+            # 找匹配 release tag
+            matched_release=$(grep -E "$run_name|$run_branch" release_tags.txt || true)
 
-            if [ -z "$release_body" ] || ! echo "$release_body" | grep -q "SHA256"; then
-              echo "⚠️ Workflow run $run_id has NO SHA256 release note"
+            if [ -z "$matched_release" ]; then
+                echo "⚠️ Workflow run $run_id has NO release tag"
             else
-              echo "✅ Workflow run $run_id has SHA256"
+                release_note=$(gh api repos/${{ github.repository }}/releases/tags/$matched_release -q '.body')
+                if ! echo "$release_note" | grep -q "SHA256"; then
+                    echo "⚠️ Workflow run $run_id has release but NO SHA256"
+                else
+                    echo "✅ Workflow run $run_id has SHA256"
+                fi
             fi
           done
         env:
