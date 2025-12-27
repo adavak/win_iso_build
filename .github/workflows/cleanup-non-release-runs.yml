@@ -1,4 +1,4 @@
-name: Check Workflow Runs by Release Tag
+name: Check Invalid Workflow Runs
 
 on:
   workflow_dispatch:
@@ -22,31 +22,29 @@ jobs:
 
       - name: Fetch releases
         run: |
-          echo "Fetching all releases..."
-          gh api repos/${{ github.repository }}/releases > releases.json
+          echo "Fetching releases..."
+          gh api repos/${{ github.repository }}/releases?per_page=50 > releases.json
           echo "Saved releases to releases.json"
 
       - name: Check workflow runs against releases
         run: |
           echo "Checking workflow runs..."
+          
+          # 获取所有有效 release tag
+          valid_tags=$(jq -r '.[].tag_name' releases.json)
+          
+          # 遍历 workflow runs
           for run_id in $(jq -r '.workflow_runs[].id' runs.json); do
-              run_created=$(jq -r ".workflow_runs[] | select(.id==$run_id) | .created_at")
               run_name=$(jq -r ".workflow_runs[] | select(.id==$run_id) | .name // empty")
-              echo "Checking run $run_id, created at $run_created, name '$run_name'..."
-
-              # 匹配 release tag（tag 包含日期或 run_name）
-              matched_release=$(jq -r --arg name "$run_name" '.[] | select(.tag_name | test($name)) | .tag_name' releases.json)
-
-              if [ -z "$matched_release" ]; then
-                  echo "⚠️ Workflow run $run_id has no corresponding release"
+              
+              if [ -z "$run_name" ]; then
+                  echo "⚠️ Workflow run $run_id has no name, skipping..."
+                  continue
+              fi
+              
+              if echo "$valid_tags" | grep -Fxq "$run_name"; then
+                  echo "✅ Workflow run $run_id corresponds to a valid release: $run_name"
               else
-                  release_note=$(jq -r --arg tag "$matched_release" '.[] | select(.tag_name==$tag) | .body' releases.json)
-                  if echo "$release_note" | grep -q "ISO SHA256:"; then
-                      echo "✅ Workflow run $run_id corresponds to release $matched_release (has ISO SHA256)"
-                  else
-                      echo "⚠️ Workflow run $run_id corresponds to release $matched_release but has NO ISO SHA256"
-                  fi
+                  echo "⚠️ Workflow run $run_id has no matching release"
               fi
           done
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
