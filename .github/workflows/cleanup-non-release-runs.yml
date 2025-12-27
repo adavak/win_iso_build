@@ -2,8 +2,6 @@ name: Test Clean Workflow Runs
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 */3 * * *'
 
 jobs:
   check-runs:
@@ -24,17 +22,24 @@ jobs:
       - name: Check workflow runs against releases
         run: |
           for run_id in $(jq -r '.workflow_runs[].id' runs.json); do
-            run_name=$(jq -r ".workflow_runs[] | select(.id==$run_id) | .name")
-            run_branch=$(jq -r ".workflow_runs[] | select(.id==$run_id) | .head_branch")
-            echo "Checking run $run_id -> branch $run_branch / name $run_name"
+            run_name=$(jq -r ".workflow_runs[] | select(.id==$run_id) | .name // empty")
+            run_branch=$(jq -r ".workflow_runs[] | select(.id==$run_id) | .head_branch // empty")
+
+            echo "Checking run $run_id -> branch '$run_branch' / name '$run_name'"
+
+            if [ -z "$run_name" ] && [ -z "$run_branch" ]; then
+                echo "⚠️ Workflow run $run_id has no branch or name, skipping..."
+                continue
+            fi
 
             # 找匹配 release tag
-            matched_release=$(grep -E "$run_name|$run_branch" release_tags.txt || true)
+            matched_release=$(grep -F -e "$run_name" -e "$run_branch" release_tags.txt || true)
 
             if [ -z "$matched_release" ]; then
                 echo "⚠️ Workflow run $run_id has NO release tag"
             else
-                release_note=$(gh api repos/${{ github.repository }}/releases/tags/$matched_release -q '.body')
+                # 包裹引号防止特殊字符报错
+                release_note=$(gh api repos/${{ github.repository }}/releases/tags/"$matched_release" -q '.body' || echo "")
                 if ! echo "$release_note" | grep -q "SHA256"; then
                     echo "⚠️ Workflow run $run_id has release but NO SHA256"
                 else
