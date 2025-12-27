@@ -14,34 +14,28 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Set up GitHub CLI
-        uses: actions/setup-gh@v2
-
-      - name: Authenticate GH CLI
-        run: |
-          echo "$GH_TOKEN" | gh auth login --with-token
-
-      - name: Get recent workflow runs
+      - name: Check runs without SHA256 release note
         run: |
           echo "Fetching workflow runs..."
+          # 获取最近的 workflow runs
           gh api repos/${{ github.repository }}/actions/runs \
             -q '.workflow_runs[] | {id: .id, head_branch: .head_branch, head_sha: .head_sha, name: .name, created_at: .created_at}' \
             > runs.json
-          echo "Saved workflow runs to runs.json"
 
-      - name: Check runs without SHA256 release note
-        run: |
+          echo "Checking each workflow run:"
           for run_id in $(jq -r '.[].id' runs.json); do
-            echo "Checking workflow run $run_id..."
-
             run_sha=$(jq -r ".[] | select(.id==$run_id) | .head_sha" runs.json)
+            echo "Run $run_id -> SHA $run_sha"
 
-            release_note=$(gh api repos/${{ github.repository }}/releases \
-              -q ".[] | select(.tag_name==\"$run_sha\") | .body" || echo "")
+            # 找这个 tag 是否有关联 release
+            release_body=$(gh api repos/${{ github.repository }}/releases \
+              -q ".[] | select(.tag_name == \"${run_sha}\") | .body" || echo "")
 
-            if [ -z "$release_note" ] || ! echo "$release_note" | grep -q "SHA256"; then
-              echo "⚠️ Workflow run $run_id has NO SHA256 release note."
+            if [ -z "$release_body" ] || ! echo "$release_body" | grep -q "SHA256"; then
+              echo "⚠️ $run_id has NO SHA256 release note"
             else
-              echo "✅ Workflow run $run_id has SHA256, keeping."
+              echo "✅ $run_id has SHA256"
             fi
           done
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
