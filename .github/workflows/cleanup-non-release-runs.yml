@@ -1,10 +1,9 @@
 name: Cleanup Short Workflow Runs
 
-# Trigger: manually or every 3 hours
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */3 * * *'  # Run every 3 hours
+    - cron: '0 * * * *'  # Run every hour
 
 jobs:
   cleanup:
