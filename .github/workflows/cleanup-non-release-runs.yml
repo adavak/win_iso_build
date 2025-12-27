@@ -1,9 +1,10 @@
 name: Cleanup Short Workflow Runs
 
+# Trigger: manually or every 3 hours
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */3 * * *'
+    - cron: '0 */3 * * *'  # Run every 3 hours
 
 jobs:
   cleanup:
@@ -11,30 +12,45 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
     steps:
-      - name: Fetch workflow runs
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install GitHub CLI
         run: |
-          echo "Fetching workflow runs..."
+          sudo apt-get update
+          sudo apt-get install -y gh jq
+
+      - name: Authenticate GH CLI
+        run: |
+          echo "${GH_TOKEN}" | gh auth login --with-token
+
+      - name: Fetch recent workflow runs
+        run: |
+          echo 'Fetching workflow runs...'
           gh api repos/${{ github.repository }}/actions/runs?per_page=50 > runs.json
           echo "Saved workflow runs to runs.json"
 
-      - name: Delete short workflow runs
+      - name: Delete short workflow runs (<10 minutes)
         run: |
-          echo "Deleting workflow runs with duration < 10 minutes..."
+          echo 'Deleting workflow runs with duration < 10 minutes...'
           
-          # Extract run ID, start time, and end time
+          # Extract run ID, start time, end time
           jq -r '.workflow_runs[] | "\(.id) \(.run_started_at) \(.updated_at)"' runs.json > runs_times.txt
           
           threshold=600  # 10 minutes in seconds
           
           while read run_id start_time end_time; do
-              # Convert times to Unix timestamp
+              # Convert to Unix timestamps
               start_ts=$(date -d "$start_time" +%s)
               end_ts=$(date -d "$end_time" +%s)
               duration=$((end_ts - start_ts))
               
               if [ $duration -lt $threshold ]; then
-                  echo "⚠️ Workflow run $run_id duration $duration seconds < $threshold, deleting..."
-                  # Delete the workflow run
-                  gh api -X DELETE repos/${{ github.repository }}/actions/runs/$run_id
+                  # ⚠️ Warning for short run
+                  echo $'\u26A0\ufe0f Workflow run '"$run_id"' duration '"$duration"' seconds < '"$threshold"', deleting...'
+                  gh api -X DELETE "repos/${{ github.repository }}/actions/runs/$run_id"
               else
-                  echo "✅ Workflow run $run_id duration $duration second_
+                  # ✅ Keep run
+                  echo $'\u2705 Workflow run '"$run_id"' duration '"$duration"' seconds, keep'
+              fi
+          done < runs_times.txt
