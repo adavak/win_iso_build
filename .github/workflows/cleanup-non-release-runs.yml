@@ -29,22 +29,19 @@ jobs:
       - name: Check workflow runs against releases
         run: |
           echo "Checking workflow runs..."
-          # 遍历 workflow_runs
           for run_id in $(jq -r '.workflow_runs[].id' runs.json); do
-              run_name=$(jq -r ".workflow_runs[] | select(.id==$run_id) | .name // empty")
-              run_branch=$(jq -r ".workflow_runs[] | select(.id==$run_id) | .head_branch // empty")
-              echo "Run $run_id -> branch '$run_branch', name '$run_name'"
+              run_sha=$(jq -r ".workflow_runs[] | select(.id==$run_id) | .head_sha")
+              echo "Run $run_id -> SHA $run_sha"
 
-              # 尝试匹配 release tag
-              matched_release=$(jq -r '.[] | select(.tag_name | startswith("Windows_")) | .tag_name' releases.json | grep -F "$run_name\|$run_branch" || true)
+              # 匹配 release 的 target_commitish
+              matched_release=$(jq -r --arg sha "$run_sha" '.[] | select(.target_commitish==$sha) | .tag_name' releases.json)
 
               if [ -z "$matched_release" ]; then
-                  echo "⚠️ Workflow run $run_id has NO corresponding release"
+                  echo "⚠️ Workflow run $run_id has no corresponding release"
               else
-                  # 获取 release note
-                  release_note=$(jq -r --arg tag "$matched_release" '.[] | select(.tag_name==$tag) | .body' releases.json || echo "")
+                  release_note=$(jq -r --arg tag "$matched_release" '.[] | select(.tag_name==$tag) | .body' releases.json)
                   if echo "$release_note" | grep -q "SHA256"; then
-                      echo "✅ Workflow run $run_id has SHA256 in release"
+                      echo "✅ Workflow run $run_id has SHA256"
                   else
                       echo "⚠️ Workflow run $run_id has release but NO SHA256"
                   fi
