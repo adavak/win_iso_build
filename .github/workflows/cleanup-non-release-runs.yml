@@ -1,0 +1,49 @@
+name: Test Clean Workflow Runs
+
+on:
+  workflow_dispatch:   # 手动触发
+  schedule:
+    - cron: '0 */3 * * *'  # 每3小时运行一次
+
+jobs:
+  check-runs:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}  # 使用你添加的 secret
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up GitHub CLI
+        uses: cli/gh-action@v2
+
+      - name: Authenticate GH CLI
+        run: |
+          echo "$GH_TOKEN" | gh auth login --with-token
+
+      - name: Get recent workflow runs
+        run: |
+          echo "Fetching workflow runs..."
+          gh api repos/${{ github.repository }}/actions/runs \
+            -q '.workflow_runs[] | {id: .id, head_branch: .head_branch, head_sha: .head_sha, name: .name, created_at: .created_at}' \
+            > runs.json
+          echo "Saved workflow runs to runs.json"
+
+      - name: Check runs without SHA256 release note
+        run: |
+          for run_id in $(jq -r '.[].id' runs.json); do
+            echo "Checking workflow run $run_id..."
+
+            # 获取 workflow run 的 commit SHA
+            run_sha=$(jq -r ".[] | select(.id==$run_id) | .head_sha" runs.json)
+
+            # 查询这个 commit 或 tag 对应的 release
+            release_note=$(gh api repos/${{ github.repository }}/releases \
+              -q ".[] | select(.tag_name==\"$run_sha\") | .body" || echo "")
+
+            if [ -z "$release_note" ] || ! echo "$release_note" | grep -q "SHA256"; then
+              echo "⚠️ Workflow run $run_id has NO SHA256 release note."
+            else
+              echo "✅ Workflow run $run_id has SHA256, keeping."
+            fi
+          done
