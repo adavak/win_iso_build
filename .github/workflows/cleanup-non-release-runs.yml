@@ -1,4 +1,4 @@
-name: Check Workflow Run Duration
+name: Cleanup Short Workflow Runs
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
     - cron: '0 */3 * * *'
 
 jobs:
-  check-duration:
+  cleanup:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
@@ -17,22 +17,24 @@ jobs:
           gh api repos/${{ github.repository }}/actions/runs?per_page=50 > runs.json
           echo "Saved workflow runs to runs.json"
 
-      - name: Check run duration
+      - name: Delete short workflow runs
         run: |
-          echo "Checking workflow run durations..."
+          echo "Deleting workflow runs with duration < 10 minutes..."
           
+          # Extract run ID, start time, and end time
           jq -r '.workflow_runs[] | "\(.id) \(.run_started_at) \(.updated_at)"' runs.json > runs_times.txt
           
-          threshold=600  # 10分钟, 小于10分钟认为无效
+          threshold=600  # 10 minutes in seconds
           
           while read run_id start_time end_time; do
+              # Convert times to Unix timestamp
               start_ts=$(date -d "$start_time" +%s)
               end_ts=$(date -d "$end_time" +%s)
               duration=$((end_ts - start_ts))
               
               if [ $duration -lt $threshold ]; then
-                  echo "⚠️ Workflow run $run_id duration $duration seconds < $threshold, likely invalid"
+                  echo "⚠️ Workflow run $run_id duration $duration seconds < $threshold, deleting..."
+                  # Delete the workflow run
+                  gh api -X DELETE repos/${{ github.repository }}/actions/runs/$run_id
               else
-                  echo "✅ Workflow run $run_id duration $duration seconds, valid"
-              fi
-          done < runs_times.txt
+                  echo "✅ Workflow run $run_id duration $duration second_
