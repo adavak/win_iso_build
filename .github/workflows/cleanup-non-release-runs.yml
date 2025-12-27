@@ -1,4 +1,4 @@
-name: Check Invalid Workflow Runs
+name: Check Workflow Runs by SHA256
 
 on:
   workflow_dispatch:
@@ -20,31 +20,26 @@ jobs:
           gh api repos/${{ github.repository }}/actions/runs?per_page=50 > runs.json
           echo "Saved workflow runs to runs.json"
 
-      - name: Fetch releases
-        run: |
-          echo "Fetching releases..."
-          gh api repos/${{ github.repository }}/releases?per_page=50 > releases.json
-          echo "Saved releases to releases.json"
-
-      - name: Check workflow runs against releases
+      - name: Check workflow runs logs for ISO SHA256
         run: |
           echo "Checking workflow runs..."
           
-          # 获取所有有效 release tag
-          valid_tags=$(jq -r '.[].tag_name' releases.json)
-          
-          # 遍历 workflow runs
           for run_id in $(jq -r '.workflow_runs[].id' runs.json); do
-              run_name=$(jq -r ".workflow_runs[] | select(.id==$run_id) | .name // empty")
+              echo "Checking run $run_id ..."
               
-              if [ -z "$run_name" ]; then
-                  echo "⚠️ Workflow run $run_id has no name, skipping..."
+              # 获取 log url
+              log_url=$(jq -r ".workflow_runs[] | select(.id==$run_id) | .logs_url")
+              
+              if [ -z "$log_url" ]; then
+                  echo "⚠️ Workflow run $run_id has no logs_url, skipping..."
                   continue
               fi
               
-              if echo "$valid_tags" | grep -Fxq "$run_name"; then
-                  echo "✅ Workflow run $run_id corresponds to a valid release: $run_name"
+              # 下载日志并检查 ISO SHA256
+              curl -s -H "Authorization: token $GH_TOKEN" "$log_url" -o run_${run_id}.zip
+              if unzip -p run_${run_id}.zip | grep -q "ISO SHA256:"; then
+                  echo "✅ Workflow run $run_id has ISO SHA256, keep it"
               else
-                  echo "⚠️ Workflow run $run_id has no matching release"
+                  echo "⚠️ Workflow run $run_id has NO ISO SHA256, could be deleted"
               fi
           done
