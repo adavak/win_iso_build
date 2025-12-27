@@ -1,4 +1,4 @@
-name: Test Workflow Runs by Artifact
+name: Check Workflow Runs by Release Tag
 
 on:
   workflow_dispatch:
@@ -26,32 +26,25 @@ jobs:
           gh api repos/${{ github.repository }}/releases > releases.json
           echo "Saved releases to releases.json"
 
-      - name: Check workflow runs by artifact
+      - name: Check workflow runs against releases
         run: |
           echo "Checking workflow runs..."
           for run_id in $(jq -r '.workflow_runs[].id' runs.json); do
-              echo "Checking run $run_id ..."
+              run_created=$(jq -r ".workflow_runs[] | select(.id==$run_id) | .created_at")
+              run_name=$(jq -r ".workflow_runs[] | select(.id==$run_id) | .name // empty")
+              echo "Checking run $run_id, created at $run_created, name '$run_name'..."
 
-              # 获取该 run 的 artifacts
-              gh api repos/${{ github.repository }}/actions/runs/$run_id/artifacts > artifacts.json
-              artifact_name=$(jq -r '.artifacts[0].name // empty' artifacts.json)
-
-              if [ -z "$artifact_name" ]; then
-                  echo "⚠️ Workflow run $run_id has no artifacts, skipping..."
-                  continue
-              fi
-
-              # 匹配 release tag
-              matched_release=$(jq -r --arg name "$artifact_name" '.[] | select(.tag_name==$name) | .tag_name' releases.json)
+              # 匹配 release tag（tag 包含日期或 run_name）
+              matched_release=$(jq -r --arg name "$run_name" '.[] | select(.tag_name | test($name)) | .tag_name' releases.json)
 
               if [ -z "$matched_release" ]; then
-                  echo "⚠️ Workflow run $run_id artifact $artifact_name has no corresponding release"
+                  echo "⚠️ Workflow run $run_id has no corresponding release"
               else
                   release_note=$(jq -r --arg tag "$matched_release" '.[] | select(.tag_name==$tag) | .body' releases.json)
                   if echo "$release_note" | grep -q "ISO SHA256:"; then
-                      echo "✅ Workflow run $run_id artifact $artifact_name has ISO SHA256"
+                      echo "✅ Workflow run $run_id corresponds to release $matched_release (has ISO SHA256)"
                   else
-                      echo "⚠️ Workflow run $run_id artifact $artifact_name release has no ISO SHA256"
+                      echo "⚠️ Workflow run $run_id corresponds to release $matched_release but has NO ISO SHA256"
                   fi
               fi
           done
