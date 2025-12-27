@@ -14,10 +14,6 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Authenticate GH CLI
-        run: |
-          echo "$GH_TOKEN" | gh auth login --with-token
-
       - name: Fetch workflow runs and releases
         run: |
           echo "Fetching workflow runs..."
