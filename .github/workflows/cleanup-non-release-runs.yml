@@ -3,7 +3,7 @@ name: Cleanup Short Workflow Runs
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */3 * * *'  # Run every 3 hours
+    - cron: '30 */3 * * *'  # Run every 3.5 hours
 
 jobs:
   cleanup:

@@ -3,7 +3,7 @@ name: Win10 LTSC 2021 X64 ZH-CN Auto Patch (7z Accelerated)
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 */3 * * *"
+    - cron: "0 */3 * * *"  # Run every 3 hours
 
 permissions: write-all
 
