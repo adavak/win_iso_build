@@ -8,6 +8,7 @@ on:
 permissions: write-all
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   SPLIT_SIZE: 2000m
   SEVENZIP: "C:\\Program Files\\7-Zip\\7z.exe"
 
