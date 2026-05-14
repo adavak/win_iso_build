@@ -54,7 +54,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
-          $all = gh run list --branch ${{ github.ref_name }} --json databaseId,conclusion,createdAt,updatedAt,runStartedAt,workflowName --limit 100 | ConvertFrom-Json
+          $all = gh run list --branch ${{ github.ref_name }} --json databaseId,conclusion,createdAt,updatedAt,startedAt,workflowName --limit 100 | ConvertFrom-Json
           Write-Host "Total runs: $($all.Count)"
           $api = "https://api.github.com/repos/${{ github.repository }}/actions/runs"
           # Test auth first
@@ -63,7 +63,7 @@ jobs:
           # Delete failed/cancelled/timed_out
           $all | Where-Object { $_.conclusion -in @('failure','cancelled','timed_out') } | ForEach-Object { Write-Host "Delete: $($_.databaseId)"; try { Invoke-RestMethod -Method Delete -Uri "$api/$($_.databaseId)" -Headers @{Authorization = "token $env:GH_TOKEN"} -ErrorAction Stop; Write-Host "  OK" } catch { Write-Host "  FAIL: $($_.Exception.Message)" } }
           # Delete short-duration runs (< 3 min) — meta4 check with nothing to build
-          $all | Where-Object { $_.updatedAt -and $_.runStartedAt -and ([DateTime]::Parse($_.updatedAt) - [DateTime]::Parse($_.runStartedAt)).TotalMinutes -lt 3 } | ForEach-Object { Write-Host "Delete short: $($_.databaseId)"; try { Invoke-RestMethod -Method Delete -Uri "$api/$($_.databaseId)" -Headers @{Authorization = "token $env:GH_TOKEN"} -ErrorAction Stop; Write-Host "  OK" } catch { Write-Host "  FAIL: $($_.Exception.Message)" } }
+          $all | Where-Object { $_.updatedAt -and $_.startedAt -and ([DateTime]::Parse($_.updatedAt) - [DateTime]::Parse($_.startedAt)).TotalMinutes -lt 3 } | ForEach-Object { Write-Host "Delete short: $($_.databaseId)"; try { Invoke-RestMethod -Method Delete -Uri "$api/$($_.databaseId)" -Headers @{Authorization = "token $env:GH_TOKEN"} -ErrorAction Stop; Write-Host "  OK" } catch { Write-Host "  FAIL: $($_.Exception.Message)" } }
           # Keep 10 newest from remaining
           $good = $all | Where-Object { $_.conclusion -notin @('failure','cancelled','timed_out') }
           Write-Host "Good runs (kept): $($good.Count)"
