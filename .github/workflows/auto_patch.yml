@@ -54,7 +54,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
-          $all = gh run list --workflow "${{ github.workflow }}" --branch ${{ github.ref_name }} --json databaseId,conclusion,createdAt --limit 100 | ConvertFrom-Json
+          $all = gh run list --branch ${{ github.ref_name }} --json databaseId,conclusion,createdAt,workflowName --limit 100 | ConvertFrom-Json
           Write-Host "Total runs: $($all.Count)"
           $api = "https://api.github.com/repos/${{ github.repository }}/actions/runs"
           # Test auth first
