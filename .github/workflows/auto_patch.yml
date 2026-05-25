@@ -52,7 +52,7 @@ jobs:
       - name: Cleanup old runs
         if: always() && matrix.version.name == 'Win11 LTSC 2024'
         env:
-          GH_TOKEN: *** secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
