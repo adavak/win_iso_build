@@ -95,9 +95,8 @@ jobs:
           }
 
           $meta4 = Invoke-RestMethodWithRetry "https://api.github.com/repos/adavak/Win_ISO_Patching_Scripts/contents/Scripts/${{ matrix.version.meta4_file }}"
-          $bytes = [Convert]::FromBase64String($meta4.content)
-          $xml = [xml][System.Text.Encoding]::UTF8.GetString($bytes)
-          $names = $xml.metalink.file | ForEach-Object { $_.name }
+          $xmlText = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($meta4.content))
+          $names = [regex]::Matches($xmlText, 'file name="([^"]+)"') | ForEach-Object { $_.Groups[1].Value }
           $sorted = $names | Sort-Object { [int]($_ -replace '^.*kb(\d+).*$', '$1') }
           $combined = $sorted -join '|'
           $hashBytes = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($combined))
