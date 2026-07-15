@@ -6,7 +6,6 @@ on:
 permissions:
   contents: write
   actions: write
-  workflows: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -294,17 +293,16 @@ jobs:
           "iso_sha256=$hash" >> $env:GITHUB_OUTPUT
 
       # 11. Create Git tag
-      - name: Create Git tag
+      - name: Create Git tag via API
         if: steps.check.outputs.run == 'true'
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.BUILD_TRIGGER_PAT }}
         run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
           $tag = "${{ steps.iso.outputs.tag }}"
-          if (-not (git tag -l $tag)) {
-            git tag $tag
-            git push origin $tag
-          }
+          $sha = "${{ github.sha }}"
+          gh api repos/${{ github.repository }}/git/refs -f ref="refs/tags/$tag" -f sha=$sha
+          echo "Tag $tag created via API"
 
       # 12. Create GitHub Release
       - name: Create Release
