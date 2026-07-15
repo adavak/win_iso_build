@@ -64,7 +64,8 @@ jobs:
                 release_tag   = $rel.release_tag
                 iso_label     = $ver.iso_label
                 expected_hash = $rel.expected_hash
-                meta4_file    = "script_${build}_x64.meta4"
+                $meta4Build = $build -replace '_iot$', ''
+                meta4_file    = "script_${meta4Build}_x64.meta4"
               }
             }
           }
