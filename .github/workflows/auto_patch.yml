@@ -59,12 +59,12 @@ jobs:
                 Write-Host "Skip $($ver.name) ($locale) — expected_hash missing, fill it in version-config.json"
                 continue
               }
+              $meta4Build = $build -replace '_iot$', ''
               $matrix += [PSCustomObject]@{
                 name          = "$($ver.name) ($locale)"
                 release_tag   = $rel.release_tag
                 iso_label     = $ver.iso_label
                 expected_hash = $rel.expected_hash
-                $meta4Build = $build -replace '_iot$', ''
                 meta4_file    = "script_${meta4Build}_x64.meta4"
               }
             }
