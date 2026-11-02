@@ -295,6 +295,28 @@ jobs:
           $actual = ($hashMatches | Select-Object -First 1).Trim().ToLower()
           if ($actual -ne "${{ matrix.version.expected_hash }}") { throw "SHA256 mismatch: $actual" }
 
+      # 8b. Record source ISO build (zero-patch guard)
+      - name: Read source ISO build
+        id: source
+        if: steps.check.outputs.run == 'true'
+        shell: pwsh
+        run: |
+          $iso = Get-ChildItem patcher -Filter *.iso -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $iso) { throw "Source ISO not found" }
+
+          $mount = Mount-DiskImage -ImagePath $iso.FullName -PassThru
+          try {
+            $drive = (Get-DiskImage -ImagePath $iso.FullName | Get-Volume | Where-Object DriveLetter | Select-Object -First 1).DriveLetter
+            if (-not $drive) { throw "Could not mount source ISO: $($iso.Name)" }
+            $img = Get-ChildItem "${drive}:\sources" -File | Where-Object { $_.Name -match '^install\.(wim|esd)$' } | Select-Object -First 1
+            if (-not $img) { throw "install.wim/esd not found in source ISO" }
+            $ver = (Get-WindowsImage -ImagePath $img.FullName -Index 1).Version
+            "version=$ver" >> $env:GITHUB_OUTPUT
+            Write-Host "Source ISO version: $ver"
+          } finally {
+            Dismount-DiskImage -ImagePath $iso.FullName -ErrorAction SilentlyContinue
+          }
+
       # 9. Run Start.cmd (auto exit via choice 9)
       - name: Run Start.cmd
         if: steps.check.outputs.run == 'true'
@@ -315,6 +337,9 @@ jobs:
 
           # Version/build and locale
           if ($iso.Name -match '(\d{1,6}\.\d{1,6})') { $versionBuild = $matches[1]; $version,$build=$versionBuild -split '\.' }
+          else { throw "Cannot parse version from ISO name: $($iso.Name)" }
+          $srcVersion = ("${{ steps.source.outputs.version }}".Trim() -replace '^10\.0\.', '')
+          if ($versionBuild -eq $srcVersion) { throw "Zero-patch ISO detected: output build $versionBuild equals source build $srcVersion" }
           if ($iso.Name -match '([A-Za-z]+-[A-Za-z]+)') { $locale = $matches[1].ToLower() }
 
           $date = Get-Date -Format "yyMMdd"
